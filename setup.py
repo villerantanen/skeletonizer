@@ -2,6 +2,9 @@ from distutils.core import setup
 setup(
   name = 'skeletonizer',
   packages = ['skeletonizer'], 
+  install_requires=[
+            'numpy','opencv-python'
+      ],
   scripts = [],
   version = '0.1',
   description = 'Skeletonizer test',
