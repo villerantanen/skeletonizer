@@ -38,7 +38,11 @@ def skeletonize(image,size=(3,3)):
     # return a thin skeleton of thresholded shape
     image_size = np.size(image)
     skel = np.zeros(image.shape,np.uint8)
- 
+
+    if (image==0).all() or (image==1).all():
+        # Image is empty, skeletonization impossible
+        return skel
+
     element = cv2.getStructuringElement(cv2.MORPH_CROSS,size)
     
     while(True):
