@@ -39,7 +39,7 @@ def skeletonize(image,size=(3,3)):
     image_size = np.size(image)
     skel = np.zeros(image.shape,np.uint8)
 
-    if (image==0).all() or (image==1).all():
+    if (image==0).all() or (image==255).all():
         # Image is empty, skeletonization impossible
         return skel
 
@@ -47,9 +47,11 @@ def skeletonize(image,size=(3,3)):
     
     while(True):
         eroded = cv2.erode(image,element)
-        temp = cv2.dilate(eroded,element)
-        temp = cv2.subtract(image,temp)
-        skel = cv2.bitwise_or(skel,temp)
+        skel = cv2.bitwise_or(skel,
+                    cv2.subtract(image,
+                        cv2.dilate(eroded,element)
+                        )
+                    )
         image = eroded.copy()
         
         zeros = image_size - cv2.countNonZero(image)
@@ -60,15 +62,21 @@ def load_image(url):
     """ reads url and returns cv2 image """
     return url_to_image(url)
 
-def convert_image(image,invert=False,adjust=1.0):
-    """ convert BGR image to Binary """
+def convert_image(image,invert=False,nhood=11):
+    """ convert BGR image to Binary 
+        invert:  Dark pixels are object pixels
+        nhood:  Size of thresholding neighborhood
+    """
     gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
     threshold_method=cv2.THRESH_BINARY
     if invert:
         threshold_method=cv2.THRESH_BINARY_INV
-    cutoff, mask=cv2.threshold(gray, 0,255, threshold_method+cv2.THRESH_OTSU)
-    cutoff=int(adjust*cutoff)
-    cutoff, mask=cv2.threshold(gray, cutoff, 255, threshold_method)
+    mask = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    threshold_method,int(nhood),2)
+    
+    #cutoff, mask=cv2.threshold(gray, 0,255, threshold_method+cv2.THRESH_OTSU)
+    #cutoff=int(adjust*cutoff)
+    #cutoff, mask=cv2.threshold(gray, cutoff, 255, threshold_method)
     return mask
 
 # plt.subplot(1,3,1)
