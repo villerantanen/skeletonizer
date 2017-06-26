@@ -49,15 +49,20 @@ def get_lbp_histogram(gray):
     radius=3
     no_points=8*radius
     lbp=skimage.feature.local_binary_pattern(gray, no_points, radius, method='uniform')
-    freq=np.histogram(lbp.ravel())[0]
+    freq=np.histogram(lbp.ravel(),bins=16)[0]
     hist = freq/sum(freq)
     return hist
     
-def get_patch_lbp(gray,no_patches=64):
+def get_patch_lbp(rgb,no_patches=64):
     histograms=[]
-    for patch in sklearn.feature_extraction.image.extract_patches_2d(gray, (32,32),max_patches=no_patches):
-        histograms.append(get_lbp_histogram(patch))
-    return np.array(histograms)
+    for color in range(3):
+        histograms.append([])
+        for patch in sklearn.feature_extraction.image.extract_patches_2d(rgb[::,::,color], (32,32),max_patches=no_patches):
+            histograms[color].append(get_lbp_histogram(patch))
+    if no_patches==None:
+        no_patches=-1
+    histograms=np.array(histograms).swapaxes(0,1).reshape(no_patches,3*16)
+    return histograms
 
 def compare_lbps(gray,cntrl):
     distances=[]
@@ -85,13 +90,15 @@ def resize_image(image):
 #url='http://imaging.ninja/img/anima.png'
 #url='http://hbu.h-cdn.co/assets/15/41/768x514/gallery-1444338501-eiffel-tower-at-night.jpg'
 url="boat.jpg"
+#url="aurajoki.jpg"
+#url="night.jpg"
+
 invert=False
 print("Invert",invert)
 if len(sys.argv)>1:
     url=sys.argv[1]
-
-gray=skimage.filters.median(resize_image(skp.load_image(url)),
-            selem=skimage.morphology.square(3))
+colored=resize_image(skimage.io.imread(url, as_grey=False))
+gray=skimage.color.rgb2gray(colored)
 if invert:
     gray=skimage.util.invert(gray)
 timer_start=print_timer(timer_start,"Image loaded")
@@ -100,18 +107,18 @@ corner_size=(64,128)
 corner_area=np.prod(corner_size)
 print("Corner",corner_size, corner_area)
 
-corner1=gray[-corner_size[0]:gray.shape[0], 0:corner_size[1]]
-corner2=gray[-corner_size[0]:gray.shape[0], -corner_size[1]:gray.shape[1]]
+corner1=colored[-corner_size[0]:gray.shape[0], 0:corner_size[1],::]
+corner2=colored[-corner_size[0]:gray.shape[0], -corner_size[1]:gray.shape[1],::]
 
-sigma1=find_sigma(corner1, 0.0003)
-sigma2=find_sigma(corner2, 0.0003)
+sigma1=find_sigma(skimage.color.rgb2gray(corner1), 0.0003)
+sigma2=find_sigma(skimage.color.rgb2gray(corner2), 0.0003)
 sigma=np.max((sigma1,sigma2))
 print("Sigma",sigma1,sigma2)
 
-level1=find_level(corner1,0.01)
-level2=find_level(corner2,0.01)
+#level1=find_level(skimage.color.rgb2gray(corner1),0.005)
+#level2=find_level(skimage.color.rgb2gray(corner2),0.005)
 
-levels=find_levels((corner1,corner2))
+levels=find_levels((skimage.color.rgb2gray(corner1),skimage.color.rgb2gray(corner2)))
 print("Level",levels)
 
 corner_lbps=get_patch_lbp(corner1)
@@ -124,30 +131,36 @@ timer_start=print_timer(timer_start,"Normalization done")
 mask=np.logical_or(gray<levels[0],gray>levels[1])
 canny=[1,0,0]*skimage.color.gray2rgb(skp.auto_canny(gray,sigma=sigma))
 skeleton=[0,1,0]*skimage.color.gray2rgb(skp.skeletonize(mask))
-merger=canny+skeleton
+merger=canny+skeleton+colored
+merger[merger>1]=1
 
-random_patches_idx=np.random.randint(0,np.prod(gray.shape),2048)
+random_patches_idx=np.random.randint(0,np.prod(gray.shape),4096)
 random_patches=[]
 for idx in random_patches_idx:
     x=int(idx/gray.shape[0])
     y=idx%gray.shape[0]
     try:
-        random_patches.append((get_lbp_histogram(gray[ (y-16):(y+16), (x-16):(x+16) ]),y,x) )
+        color_hist=[]
+        for color in range(3):
+            color_hist.append(get_lbp_histogram(colored[ (y-16):(y+16), (x-16):(x+16), 0 ]))
+        color_hist=np.array(color_hist).reshape(1,3*16)
+        random_patches.append((color_hist,y,x) )
     except ValueError:
         pass
 random_patches=np.array(random_patches)
 distances=sklearn.metrics.pairwise.chi2_kernel(
                 corner_lbps,
-                [x[0] for x in random_patches])
+                [x[0][0] for x in random_patches])
 min_distances=distances.min(0)
-distance_heatmap=np.zeros(gray.shape,dtype=np.uint8)
+min_distances=-min_distances+max(min_distances)
+distance_heatmap=np.zeros(gray.shape)
 for patch in zip(random_patches,min_distances):
-    distance_heatmap[ patch[0][1], patch[0][2] ]=255*patch[1]
+    distance_heatmap[ patch[0][1], patch[0][2] ]=patch[1]
 distance_heatmap=skimage.filters.rank.maximum(distance_heatmap,
-                        selem=skimage.morphology.square(int(32/2)))
+                        selem=skimage.morphology.square(int(32/4)))
 heatmap_color=skimage.color.gray2rgb(distance_heatmap)
-heatmap_color[::,::,1]=255
-heatmap_color[::,::,2]=128
+heatmap_color[::,::,1]=1
+heatmap_color[::,::,2]=0.5
 heatmap_color=skimage.color.hsv2rgb(heatmap_color)
 heatmap_color=skimage.color.gray2rgb(distance_heatmap>0)*heatmap_color
 heatmap_visu=skimage.color.gray2rgb(gray)
@@ -156,10 +169,6 @@ print(random_patches.shape)
 #lbps_comparison=compare_lbps(gray,corner_lbps)
 #print(lbps_comparison)
 
-import matplotlib.pyplot as plt
-plt.imshow(distance_heatmap,cmap='gray')
-plt.draw()
-plt.pause(0.1)
 for r in random_patches:
     pass
     #~ print(r)
@@ -171,6 +180,8 @@ timer_start=print_timer(timer_start,"Detection done")
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
+    corner1=skimage.color.rgb2gray(corner1)
+    corner2=skimage.color.rgb2gray(corner2)
     if invert:
         gray=skimage.util.invert(gray)
         gray[-corner_size[0]:gray.shape[0], 0:corner_size[1]]-=corner1
@@ -178,11 +189,14 @@ with warnings.catch_warnings():
     else:
         gray[-corner_size[0]:gray.shape[0], 0:corner_size[1]]+=corner1
         gray[-corner_size[0]:gray.shape[0], -corner_size[1]:gray.shape[1]]+=corner2
+    gray[gray>1]=1
+    gray[gray<0]=0
     skimage.io.imsave('01-gray.png',gray)
     skimage.io.imsave('02-mask.png',255*mask)
     skimage.io.imsave('03-canny.png',255*canny)
     skimage.io.imsave('04-skeleton.png',255*skeleton)
-    skimage.io.imsave('05-merger.png',255*merger)
+    skimage.io.imsave('05-merger.png',merger)
+    skimage.io.imsave('06-heatmap.png',distance_heatmap)
 
 
 # plt.subplot(2,2,1)
